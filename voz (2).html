@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Central de Ajuda por Voz — Feijó</title>
+<style>
+:root{--wine:#7b1e3a;--bg:#f5f1f3;--text:#2f1b22}*{box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}body{margin:0;background:var(--bg);color:var(--text);padding:18px}main{max-width:520px;margin:0 auto;background:#fff;border-radius:16px;padding:22px;box-shadow:0 4px 18px #0001}h1{font-size:22px;color:var(--wine);margin:0 0 8px}p{line-height:1.45}.status{padding:12px;border-radius:9px;background:#f4eef1;margin:14px 0;min-height:48px}button{border:0;border-radius:8px;padding:12px 15px;font-weight:bold;cursor:pointer;margin:4px 3px 4px 0}.primary{background:var(--wine);color:white}.green{background:#188038;color:white}.red{background:#d93025;color:white}.gray{background:#e9edf2}.hidden{display:none!important}.small{font-size:12px;color:#666}
+</style></head><body><main>
+<h1>Central de Ajuda por Voz</h1><p id="identity">Conectando...</p><div class="status" id="status" aria-live="polite">Preparando conexão segura...</div>
+<div id="operatorControls" class="hidden"><button class="primary" id="callBtn">☎ Solicitar chamada</button><button class="red hidden" id="endBtn">Encerrar chamada</button></div>
+<div id="adminControls" class="hidden"><button class="green hidden" id="answerBtn">Atender chamada</button><button class="red hidden" id="declineBtn">Recusar chamada</button><button class="red hidden" id="adminEndBtn">Encerrar chamada</button></div>
+<button class="gray hidden" id="muteBtn">Silenciar microfone</button><audio id="remoteAudio" autoplay playsinline controls style="width:100%;margin-top:14px"></audio>
+<p class="small">Mantenha esta janela aberta durante a chamada. O navegador solicitará autorização para usar o microfone. O áudio é transmitido diretamente entre os navegadores; esta página não grava nem armazena a conversa.</p>
+</main>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+(function(){
+const params=new URLSearchParams(location.search),role=params.get('role')==='admin'?'admin':'operador',displayName=params.get('name')||(role==='admin'?'ADM/ADM 2':'Operador'),ADMIN_PEER_ID='central-ajuda-voz-feijo-2026';
+const $=id=>document.getElementById(id);let peer=null,incomingCall=null,activeCall=null,localStream=null,muted=false;
+$('identity').textContent=(role==='admin'?'Atendimento ADM / ADM 2: ':'Operador: ')+displayName;
+$(role==='admin'?'adminControls':'operatorControls').classList.remove('hidden');
+function status(t){$('status').textContent=t}function show(id,v){$(id).classList.toggle('hidden',!v)}
+function controls(inCall){show('muteBtn',inCall);if(role==='operador'){show('callBtn',!inCall);show('endBtn',inCall)}else{show('answerBtn',!!incomingCall&&!inCall);show('declineBtn',!!incomingCall&&!inCall);show('adminEndBtn',inCall)}}
+async function getMic(){if(!window.isSecureContext||!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('O microfone exige uma página HTTPS aberta diretamente em uma aba do navegador.');return navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false})}
+function attachCall(call){activeCall=call;call.on('stream',stream=>{$('remoteAudio').srcObject=stream;$('remoteAudio').play().catch(()=>{});status('Chamada conectada. Vocês já podem conversar.');controls(true)});call.on('close',cleanupCall);call.on('error',err=>{status('Erro na chamada: '+(err&&err.message||'falha de conexão'));cleanupCall()})}
+function cleanupCall(){if(activeCall){try{activeCall.close()}catch(e){}}activeCall=null;incomingCall=null;if(localStream){localStream.getTracks().forEach(t=>t.stop())}localStream=null;$('remoteAudio').srcObject=null;controls(false);if(role==='admin')status('Atendimento ativo. Aguardando chamada.');else status('Chamada encerrada. Você pode solicitar ajuda novamente.')}
+peer=new Peer(role==='admin'?ADMIN_PEER_ID:undefined,{debug:1});
+peer.on('open',id=>{status(role==='admin'?'Atendimento ativo. Aguardando chamada.':'Conectado ao serviço de voz. Clique em “Solicitar chamada” para chamar o ADM ou ADM 2.');if(role==='admin')$('identity').textContent='Atendimento ADM / ADM 2: '+displayName+' (disponível)'});
+peer.on('error',err=>{let msg=err&&err.type==='unavailable-id'?'Já existe uma sessão de atendimento por voz ativa. Feche a outra página de ADM/ADM 2 ou use-a para atender.':(err&&err.message||'Não foi possível conectar ao serviço de voz.');status(msg)});
+peer.on('call',call=>{if(role!=='admin'){call.close();return}if(activeCall||incomingCall){call.close();return}incomingCall=call;status('Chamada recebida de '+((call.metadata&&call.metadata.name)||'um operador')+'. Clique em Atender chamada.');controls(false)});
+$('callBtn').addEventListener('click',async()=>{if(role!=='operador'||activeCall)return;try{status('Solicitando acesso ao microfone...');localStream=await getMic();status('Chamando ADM / ADM 2...');const call=peer.call(ADMIN_PEER_ID,localStream,{metadata:{name:displayName,userId:params.get('userId')||''}});if(!call)throw new Error('Não foi possível iniciar a chamada. Confirme que o atendimento ADM/ADM 2 está ativo.');attachCall(call);controls(true)}catch(e){status(e.message||'Não foi possível acessar o microfone.');if(localStream)localStream.getTracks().forEach(t=>t.stop());localStream=null;controls(false)}});
+$('answerBtn').addEventListener('click',async()=>{if(role!=='admin'||!incomingCall)return;try{status('Solicitando acesso ao microfone...');localStream=await getMic();const call=incomingCall;call.answer(localStream);attachCall(call);status('Chamada atendida. Conectando o áudio...');controls(true)}catch(e){status(e.message||'Não foi possível acessar o microfone.');if(localStream)localStream.getTracks().forEach(t=>t.stop());localStream=null;controls(false)}});
+$('declineBtn').addEventListener('click',()=>{if(incomingCall){incomingCall.close();incomingCall=null}status('Chamada recusada. Atendimento ativo.');controls(false)});
+$('endBtn').addEventListener('click',cleanupCall);$('adminEndBtn').addEventListener('click',cleanupCall);
+$('muteBtn').addEventListener('click',()=>{if(!localStream)return;muted=!muted;localStream.getAudioTracks().forEach(t=>t.enabled=!muted);$('muteBtn').textContent=muted?'Ativar microfone':'Silenciar microfone'});
+window.addEventListener('beforeunload',()=>{if(activeCall)activeCall.close();if(peer)peer.destroy();if(localStream)localStream.getTracks().forEach(t=>t.stop())});
+})();
+</script></body></html>
